@@ -1,0 +1,2645 @@
+rm(list = ls(all.names = TRUE)) 
+gc()
+setwd("D:/guojl/研究生/课题/CKD/scRNA/An atlas of healthy and injured cell states and niches in the human kidney/test")
+library(Seurat)
+library(Matrix)
+library(dplyr)
+your_data <- readRDS("D:/guojl/研究生/课题/CKD/scRNA/An atlas of healthy and injured cell states and niches in the human kidney/test/GSE183276_Kidney_Healthy-Injury_Cell_Atlas_scCv3_Counts_03282022.RDS")
+class(your_data)  
+slotNames(your_data)  
+head(your_data@i,5)        
+head(your_data@p,5)        
+head(your_data@x,5)        
+your_data@Dim      
+head(rownames(your_data), 5)
+head(colnames(your_data), 5)
+file_path <- "注释.txt"
+file.exists(file_path)  
+readLines(file_path, n = 3) %>% cat(sep = "\n")
+library(magrittr)
+metadata <- read.delim(file_path)  
+metadata <- read.table(file_path, header = TRUE, sep = "\t")  
+cells_in_matrix <- colnames(your_data)  
+cells_in_metadata <- metadata[,1]      
+if(!all(sort(cells_in_matrix) == sort(cells_in_metadata))) {
+  warning("细胞ID不匹配！需要对齐数据")
+  common_cells <- intersect(cells_in_matrix, cells_in_metadata)
+  your_data <- your_data[, common_cells]
+  metadata <- metadata[metadata[,1] %in% common_cells, ]
+  rownames(metadata) <- metadata[,1]
+  metadata <- metadata[common_cells, ]  # 保证顺序一致
+}
+library(Seurat)
+seurat_obj <- CreateSeuratObject(
+  counts = your_data,          
+  meta.data = metadata,        
+  project = "Kidney_Atlas",    
+  min.cells = 3,               
+  min.features = 200           
+)
+cat("表达矩阵细胞数:", ncol(seurat_obj), "\n")
+cat("注释数据细胞数:", nrow(seurat_obj@meta.data), "\n")
+print(head(seurat_obj@meta.data[, c("nCount_RNA", "nFeature_RNA", "percent.mt")]))
+if("predicted.subclass.l3" %in% colnames(metadata)){
+  print(table(seurat_obj$predicted.subclass.l3))
+}
+merged_seurat<-seurat_obj
+head(merged_seurat@meta.data)
+hb_genes <- c("HBA1","HBA2","HBB","HBD","HBE1","HBG1","HBG2","HBM","HBQ1","HBZ")
+hb_genes_filtered <- hb_genes[hb_genes %in% rownames(merged_seurat)]
+print(hb_genes_filtered)  
+length(hb_genes_filtered) 
+merged_seurat[["percent.hb"]] <- PercentageFeatureSet(
+  merged_seurat, 
+  features = hb_genes_filtered, 
+  assay = "RNA"  
+)
+library(ggplot2)
+VlnPlot(merged_seurat, 
+        features = c("nFeature_RNA"),
+        ncol = 1,
+        pt.size = 0.1) +
+  ggtitle("merged_seurat QC Metrics (before Filtering)")
+VlnPlot(merged_seurat, 
+        features = c("percent.mt"),
+        ncol = 1,
+        pt.size = 0.1)+
+  ggtitle("merged_seurat percent.mt (before Filtering)")
+VlnPlot(merged_seurat, 
+        features = c("nCount_RNA"),
+        ncol = 1,
+        pt.size = 0.1)+
+  ggtitle("merged_seurat nCount_RNA (before Filtering)")
+VlnPlot(merged_seurat, 
+        features = c("percent.hb"),
+        ncol = 1,
+        pt.size = 0.1)+
+  ggtitle("merged_seurat percent.hb (before Filtering)")
+library(scDblFinder)
+sce <- as.SingleCellExperiment(merged_seurat2)
+sce <- scDblFinder(sce)
+merged_seurat$doublet_score <- sce$scDblFinder.score
+merged_seurat$doublet_class <- ifelse(sce$scDblFinder.class == "singlet", "Singlet", "Doublet")
+singlets <- subset(merged_seurat, subset = doublet_class == "Singlet")
+merged_seurat<-singlets
+save(merged_seurat, file="merged_seurat.RData")
+merged_seurat2 <- subset(merged_seurat,
+                       subset = nFeature_RNA > 300 & nFeature_RNA < 6000 &
+                         percent.mt < 30 & percent.hb < 1)
+VlnPlot(merged_seurat2, 
+        features = c("nFeature_RNA"),
+        ncol = 1,
+        pt.size = 0.1) +
+  ggtitle("QC Metrics (After Filtering)")
+VlnPlot(merged_seurat2, 
+        features = c("percent.mt"),
+        ncol = 1,
+        pt.size = 0.1)
+VlnPlot(merged_seurat2, 
+        features = c("nCount_RNA"),
+        ncol = 1,
+        pt.size = 0.1)
+
+print(paste("总细胞数:", ncol(merged_seurat)))
+print(paste("基因数:", nrow(merged_seurat)))
+print(paste("总细胞数:", ncol(merged_seurat2)))
+print(paste("基因数:", nrow(merged_seurat2)))
+setwd("D:/guojl/研究生/课题/CKD/scRNA/An atlas of healthy and injured cell states and niches in the human kidney/test/去双细胞")
+save(merged_seurat,file = "merged_seurat.Rdata")
+save(merged_seurat2,file = "merged_seurat_QC.Rdata")
+rm(list = ls(all.names = TRUE)) 
+gc()
+setwd("D:/guojl/研究生/课题/CKD/scRNA/An atlas of healthy and injured cell states and niches in the human kidney/test/去双细胞")
+load('merged_seurat_QC.Rdata')
+library(Seurat)
+merged_seurat2 <- subset(merged_seurat2, subset = condition.l2 != "AKI")
+library(ggplot2)
+merged_seurat2 <- NormalizeData(
+  object = merged_seurat2,
+  normalization.method = "LogNormalize",  
+  scale.factor = 10000                    
+)
+merged_seurat2 <- FindVariableFeatures(
+  merged_seurat2, 
+  selection.method = "vst", 
+  nfeatures = 2000        
+)
+merged_seurat2 <- ScaleData(
+  object = merged_seurat2, 
+  features = VariableFeatures(merged_seurat2),vars.to.regress = c("percent.mt", "percent.hb")  # 仅缩放高变基因，非全基因组！
+)
+merged_seurat2 <- RunPCA(merged_seurat2)
+merged_seurat2 <- RunUMAP(merged_seurat2, dims = 1:10)
+DimPlot(merged_seurat2,group.by = "condition.l2", reduction = "umap")
+DimPlot(merged_seurat2,group.by = "state.l2", reduction = "umap")
+DimHeatmap(merged_seurat2, 
+           dims = 1:20,        
+           nfeatures = 10,    
+           cells = 200,       
+           balanced = TRUE)   
+ElbowPlot(merged_seurat2, 
+          ndims = 15,         
+          reduction = "pca") + 
+  geom_vline(xintercept = 15, linetype = 2, color = "red") 
+save(merged_seurat2,file = 'merged_seurat2_RunPCA.Rdata')
+load('merged_seurat2_RunPCA.Rdata')
+library(harmony)
+harmony<- RunHarmony(
+  object = merged_seurat2,
+  group.by = "condition.l2",     
+  reduction = "pca",      
+  dims = 1:10,            
+  assay = "RNA",         
+  reduction.save = "harmony"  
+)
+ElbowPlot(harmony,ndims = 20)
+cor_post_norm <- cor(harmony$nCount_RNA, harmony$nFeature_RNA)
+print(paste("标准化后相关性:", round(cor_post_norm, 2))) 
+library(ggplot2)
+VlnPlot(harmony, 
+        features = c("nCount_RNA"), 
+        group.by = "condition.l2", 
+        log = TRUE) + 
+  geom_hline(yintercept = median(harmony$nCount_RNA), color = "red")
+harmony<- FindNeighbors(harmony,reduction = 'harmony',dims = 1:10)
+harmony <- FindClusters(harmony,resolution = seq(from = 0.1,to = 1.0, by = 0.1))
+harmony <- RunUMAP(harmony,dims = 1:10,reduction = 'harmony',n.neighbors = 100, 
+                   spread = 0.2)
+DimPlot(harmony,reduction = 'umap',group.by = 'state.l2', label = T) 
+DimPlot(harmony,reduction = 'umap',group.by = 'state.l2', label = T) 
+library(clustree)
+clustree(harmony)
+harmony$RNA_snn_res.0.1
+Idents(harmony) <- 'RNA_snn_res.0.1'
+DimPlot(harmony,reduction = 'umap',group.by = 'RNA_snn_res.0.1', label = T) 
+library(dplyr)
+colnames(harmony@meta.data)[colnames(harmony@meta.data) == "condition.l2"] <- "group"
+colnames(harmony@meta.data)[colnames(harmony@meta.data) == "state.l2"] <- "cell_type"
+colnames(harmony@meta.data)
+save(harmony,file = 'harmony_dim10.Rdata')
+rm(list = ls(all.names = TRUE)) 
+gc()
+setwd("D:/guojl/研究生/课题/CKD/scRNA/An atlas of healthy and injured cell states and niches in the human kidney/test/去双细胞")
+library(Seurat)
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(openxlsx)
+load("harmony_dim10.Rdata")
+harmony.markers <- FindAllMarkers(harmony, only.pos = TRUE, min.pct = 0.3, logfc.threshold = 0.75,test.use = "roc") 
+harmony.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC) 
+write.xlsx(harmony.markers, file = "markers.xlsx", colNames = TRUE, rowNames = FALSE)
+celltype_markers <- list(
+  "Podocytes" = c("NPHS1", "NPHS2", "WT1", "SYNPO", "PODXL", "MAF", "CLIC5", "KIRREL", "NTRK2"),
+  "GMC" = c("PDGFRB", "ACTA2", "DES", "COL4A1", "NOTCH3", "ITGA8", "TIMP3", "HIGD1B", "CFH"),
+  "PT" = c("SLC34A1", "CUBN","ALDOB","FABP1","TPM1","ACY1","AGMAT","VCAM1","LRP2", "HAVCR1","ATP5G3", "GATM", "LGALS2", "SLC13A3", "SLC17A3", "ANPEP"),
+  "TAL" = c("SLC12A1","SNHG14","ATP6V0C","MICOS10","MICOS10" ,"UMOD", "CLDN16", "CLCNKB", "KCNJ1",  "VGLL2", "AVPR2"),
+  "ATL" = c("CLDN10", "SLC14A2", "CASP1", "SLC4A9", "CDH6", "LYPD1", "MIR181A1HG"),
+  "DTL" = c("SEMA3G", "SLCO4C1", "TINAG", "CITED1", "KCNIP4"),
+  "DCT" = c("SLC12A3","HSD11B2","CALB1", "TRPM6", "SLC8A1", "FXYD2", "NCC", "WNK4", "KLHL3", "DEFB1"),
+  "CD" = c("AQP2", "AQP3", "SCNN1B", "SCNN1G", "AVPR2", "REN", "CALM1", "ATOHB"),
+  "IC" = c("ATP6V1G3", "SLC4A1", "FOXI1", "SLC26A7", "KIT", "PROM1", "TMEM213"),
+  "FIB" = c("COL1A1","ACTA2", "DCN", "LUM", "PDGFRA", "MEIS2", "PROCR", "PDGFRα", "S100A4"),
+  "EC" = c("PECAM1", "CDH5", "ESM1", "FLT1", "KDR", "TEK", "CD34", "LYVE1"),
+  "T" = c("CD3D", "CD3E", "CD8A", "CD4", "CCL5", "GZMK", "IL7R", "TCF7"),
+  "B" = c("CD19", "MS4A1", "CD79A", "CD79B", "BANK1", "TNFRSF13C", "FCRL2", "CD22"),
+  "Macro" = c("CD14", "CD68", "CD163", "ITGAM", "LYZ", "C1QC", "MAFB", "MRC1"),
+  "DC" = c("CD1C", "CLEC9A", "CD207", "CLEC10A", "ITGAX", "CD209", "LAMP3", "CLEC4C"),
+  "Mast" = c("KIT", "TPSAB1", "CPA3", "MS4A2", "SERPINB2", "HDC", "CMA1", "GATA2"),
+  "NK" = c("NKG7", "GNLY", "NCR1", "KLRD1", "KLRF1", "FCGR3A", "KIR2DL4", "NCAM1"))
+library(magrittr)
+assign_celltype <- function(cluster_id) {
+  suppressWarnings({
+    top_genes <- harmony.markers %>%
+      dplyr::filter(cluster == as.character(cluster_id)) %>%  
+      dplyr::arrange(desc(avg_log2FC)) %>%
+      head(30) %>%
+      dplyr::pull(gene)
+  })
+  ct_names <- names(celltype_markers)  
+  scores <- sapply(ct_names, function(ct) {
+    sum(top_genes %in% celltype_markers[[ct]])
+  })
+  
+  if (max(scores) < 2) return("Uncertain")
+  return(ct_names[which.max(scores)])  
+}
+cluster_ids <- levels(Idents(harmony))
+annotations <- sapply(cluster_ids, assign_celltype)
+print(annotations)
+annotation_df <- data.frame(
+  cluster = cluster_ids,
+  cell_type = annotations,
+  stringsAsFactors = FALSE
+)
+print(annotation_df)
+harmony$cell_type <- plyr::mapvalues(
+  x = Idents(harmony),
+  from = annotation_df$cluster,
+  to = annotation_df$cell_type
+)
+
+DimPlot(harmony, 
+        reduction = "umap",
+        group.by = "cell_type",  
+        label = TRUE,
+        label.size = 4) +
+  ggtitle("Cell Type Annotation")
+harmony@meta.data$group[harmony@meta.data$group == "Ref"] <- "Healthy"
+unique(harmony@meta.data$group)
+save(harmony,file = "harmony_annotation1.RData")
+load("harmony_annotation1.RData")
+top10_markers <- harmony.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) %>%
+  ungroup()
+annotation_df <- data.frame(
+  cluster = levels(Idents(harmony)),
+  cell_type = c("DCT", "TAL", "EC", "PT", "PT", "PT", "CD", "Macro", "T", "GMC", "IC")
+)
+top10_markers <- top10_markers %>%
+  left_join(annotation_df, by = "cluster")
+harmony$cell_type <- plyr::mapvalues(
+  x = Idents(harmony),
+  from = annotation_df$cluster,
+  to = annotation_df$cell_type
+)
+harmony$cell_type <- factor(harmony$cell_type, 
+                            levels = c("PT", "TAL", "DCT", "CD", "IC", "EC", "GMC", "T", "Macro"))
+plot_genes <- top10_markers %>%
+  arrange(match(cell_type, levels(harmony$cell_type)), desc(avg_log2FC)) %>%
+  pull(gene)
+heatmap <- DoHeatmap(
+  object = harmony,
+  features = plot_genes,
+  group.by = "cell_type",        
+  size = 6 ,                      
+  angle = 45,                    
+  draw.lines = TRUE              
+) +
+  theme(
+    axis.text.y = element_text(size = 12), 
+    legend.position = "none"     
+  ) 
+print(heatmap)
+ggsave(
+  filename = "heatmap.png",  # 或 .tiff
+  width = 15,    
+  height = 20,  
+  dpi = 600     
+)
+
+cell_type_list <- SplitObject(harmony, split.by = "cell_type")
+target_gene <- "ALDH2"
+library(colorspace)
+c<-c(
+  "PT" = "#00695C", "EC" = "#FF6F00", "DCT" = "#01579B",
+  "T" = "#6A1B9A",  "CD" = "#616161","GMC" = "#FDD835",
+  "TAL" = "#00838F","Macro" = "#B71C1C","IC" = "#795548")
+p_cell <- DimPlot(
+  harmony,
+  reduction = "umap",
+  group.by = "cell_type",
+  pt.size = 0.4,
+  label = FALSE,
+  repel = TRUE,
+  raster = FALSE,
+  alpha = 1
+) + 
+  scale_color_manual(values = c) + 
+  xlab("UMAP 1") + 
+  ylab("UMAP 2") +
+  ggtitle("Cell Type") +  
+  theme(
+    plot.title = element_text(size = 32, family = "sans",face = "plain" ),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.title = element_text(size = 32), 
+    axis.text = element_text(size = 32, color = "black"),
+    # 图例设置
+    legend.text = element_text(size = 32, family = "Arial"),  
+    legend.title = element_text(size = 32) ,
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15))
+  )
+print(p_cell)
+ggsave(
+  filename = "组合图.png",  
+  plot = p_cell,
+  width = 10,   
+  height = 8,   
+  dpi = 600    
+)
+
+library(Seurat)
+library(tidyverse)
+data <- data.frame()
+target_gene <- "ALDH2"
+library(dplyr)
+groups_to_analyze <- c("Healthy", "CKD")
+for (cell_type in names(cell_type_list)) {
+  obj <- cell_type_list[[cell_type]]
+  
+  if (!target_gene %in% rownames(obj)) next
+  for (group_name in groups_to_analyze) {
+    cells <- colnames(obj)[obj$group == group_name]
+    if (length(cells) == 0) {
+      avg_exp <- 0
+      pct_exp <- 0
+    } else {
+      exp_data <- GetAssayData(obj, assay = "RNA", slot = "data")[target_gene, cells]
+      avg_exp <- mean(exp_data)
+      pct_exp <- mean(exp_data > 0) * 100
+    }
+    data <- rbind(data, data.frame(
+      cell_type = cell_type,
+      group = group_name,
+      avg.exp = avg_exp,
+      pct.exp = pct_exp
+    ))
+  }
+}
+cell_order <- data %>%
+  group_by(cell_type) %>%
+  summarise(max_avg = max(avg.exp)) %>%
+  arrange(desc(max_avg)) %>%
+  pull(cell_type)
+
+data$cell_type <- factor(data$cell_type, levels = cell_order)
+data$group <- factor(data$group, levels = c("Healthy", "CKD"))
+data$pct_bin <- cut(
+  data$pct.exp,
+  breaks = c(0, 20, 40, 60,80),
+  include.lowest = TRUE,
+  labels = c("0-20%", "20-40%", "40-60%","60-80%")
+)
+write.xlsx(
+  x = data,                  
+  file = "ALDH2气泡图gene_expression_summary.xlsx",  
+  colNames = TRUE,          
+  rowNames = FALSE,          
+  firstActiveRow = 2,       
+  borders = "surrounding",   
+  headerStyle = createStyle( 
+    textDecoration = "bold", 
+    halign = "center",
+    valign = "center"
+  )
+)
+library(ggplot2)
+p <- ggplot(data, aes(x = cell_type, y = group)) +
+  geom_point(
+    aes(color = avg.exp, size = pct_bin),
+    alpha = 0.9,
+    stroke = 0.5
+  ) +
+  scale_size_manual(
+    values = c("0-20%"=8, "20-40%"=10, "40-60%"=12,"60-80%"=14),
+    name = "Expression rate",
+    drop = FALSE  # 显示所有分档
+  ) +
+  scale_color_gradientn(
+    colors = c("#D3D3D3", "#555555", "#DAA520", "#8B0000"),
+    values = scales::rescale(c(0, 0.3, 0.6, 1.2)),  
+    limits = c(0, 1.2),
+    name = "Expression level",
+    guide = guide_colorbar(
+      title.position = "top",
+      barwidth = 12)
+  ) +
+  scale_y_discrete(
+    limits = c("CKD", "Healthy"), 
+    labels = c("Healthy" = "Healthy",  "CKD" = "CKD")
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 24,color = "black"),
+    axis.text.y = element_text(size = 24,color = "black"),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    legend.key.size = unit(1, "cm"),
+    legend.title = element_text(size = 24,color = "black"),
+    legend.text = element_text(size = 24,color = "black"),
+    aspect.ratio = 0.15
+  ) +
+  coord_fixed(ratio = 2)  
+print(p)
+ggsave(
+  filename = "气泡图.png",  
+  plot = p,               
+  dpi = 600,              
+  width = 8,            
+  height = 10,            
+  units = "in",          
+  bg = "white"            
+)
+pt_seurat <- subset(harmony, subset = cell_type == "PT")
+save(pt_seurat,file = "pt_seurat.RData")
+
+rm(list = ls(all.names = TRUE)) 
+gc()
+setwd("D:/guojl/研究生/课题/CKD/scRNA/An atlas of healthy and injured cell states and niches in the human kidney/test/去双细胞")
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+load("pt_seurat.RData")
+celltype_markers <- list(
+  "PT S1/S2" = c("CYP27A1", "SLC5A12", "RBP4", "ENPEP", "GSTA1", "SLC7A13", "FBP1", 
+                 "SLC5A2", "SLC3A1", "PDZK1", "SLC20A2", "SLC5A8",
+                 "SLC34A1", "LRP2","FABP1","TPM1","VCAM1"),
+  "PT S3" = c("ALDOB", "TMEM27", "HPX", "SLC22A6", "PDZK1IP1", "GGT1", "SLC22A13")
+)
+library(magrittr)
+assign_celltype <- function(cluster_id) {
+  suppressWarnings({
+    top_genes <- harmony.markers %>%
+      dplyr::filter(cluster == as.character(cluster_id)) %>%  
+      dplyr::arrange(desc(avg_log2FC)) %>%
+      head(30) %>%
+      dplyr::pull(gene)
+  })
+  ct_names <- names(celltype_markers) 
+  scores <- sapply(ct_names, function(ct) {
+    sum(top_genes %in% celltype_markers[[ct]])
+  })
+  
+  if (max(scores) < 2) return("Uncertain")
+  return(ct_names[which.max(scores)]) 
+}
+cluster_ids <- levels(Idents(pt_seurat))
+annotations <- sapply(cluster_ids, assign_celltype)
+print(annotations)
+pt_seurat@meta.data$pt_subtype <- annotations[as.character(pt_seurat@meta.data$RNA_snn_res.0.1)]
+my_colors <- c(
+  "PT S1/S2" = "#2B547E",
+  "PT S3" = "#1B5E20"
+)
+p1 <- DimPlot(pt_seurat, 
+              group.by = "pt_subtype",
+              cols = my_colors,
+              pt.size = 0.8,
+              reduction = "umap") +
+  ggtitle("PT subclusters") +
+  guides(color = guide_legend(
+    nrow = 1,
+    override.aes = list(size = 6)
+  )) +
+  labs(
+    x = "UMAP 1",
+    y = "UMAP 2",
+    color = "Cell Type"
+  ) +
+  theme(
+    plot.title = element_text(size = 32, hjust = 0.5, face = "plain"),
+    legend.position = "top",
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24,margin = margin(r = 10)),  
+    legend.justification = "center",
+    legend.key.size = unit(1.2, "cm"),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.title = element_text(size = 32),
+    axis.text = element_text(size = 32, color = "black"),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    axis.text.y = element_text(angle = 90, hjust = 0.5, vjust = 0.5)
+  )
+p1
+ggsave(
+  filename = "SubUMAP1.png",
+  plot = p1,
+  width = 8,
+  height = 8,  
+  dpi = 600
+)
+save(pt_seurat, file = "pt_seurat_subcluster.RData")
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+custom_genes <- c( "RBP4","PDZK1", "ALDOB", "TMEM27", "SLC22A6")
+valid_genes <- custom_genes[custom_genes %in% rownames(pt_seurat[["RNA"]])]
+custom_bubble  <- DotPlot(
+  object = pt_seurat,
+  features = valid_genes,
+  group.by = "pt_subtype",  
+  cols = c("#EDDA74","#7F462C"),  
+  dot.scale = 16,
+  assay = "RNA"
+) +
+  ggtitle("Marker Genes in subclusters of PT") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 30, color = "black"),
+    axis.text.y = element_text(size = 30, color = "black"),
+    axis.line = element_line(color = "black", linewidth = 1),  # 坐标轴线
+    axis.ticks = element_line(color = "black", linewidth = 1),  # 刻度线
+    axis.ticks.length = unit(0.25, "cm"),  # 刻度线长度
+    axis.title = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 30),
+    legend.text = element_text(size = 30),
+    legend.key.size = unit(1, "cm"),
+    legend.text.align = 1,  # 右对齐文本
+    panel.grid.major = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 30, color = "black")
+  ) +
+  labs(
+    color = "Expression Level",
+    size = "% Cells Expressing"
+  ) +
+  coord_flip()  
+custom_bubble 
+ggsave(
+  filename = "subPT_top marker2.png",
+  plot = custom_bubble,
+  width = 12,
+  height = 8,
+  dpi = 600
+)
+pt_s1s2_seurat <- subset(pt_seurat, subset = pt_subtype == "PT S1/S2")
+cat("Total cells:", ncol(pt_seurat), "\n")
+DimPlot(pt_s1s2_seurat, 
+        group.by = "group", 
+        pt.size = 0.8,
+        reduction = "umap") + 
+  ggtitle("PT S1/S2 Cells Only") +
+  theme(plot.title = element_text(size = 32, hjust = 0.5))
+
+pt_seurat<- pt_s1s2_seurat
+
+DimPlot(pt_seurat, 
+        group.by = "RNA_snn_res.0.1",
+        reduction = "umap",
+        label = TRUE,
+        label.size = 6) +
+  ggtitle("Subclusters") +
+  theme_minimal() +
+  theme(legend.position = "top",
+        plot.title = element_text(hjust = 0.5, size = 16))
+if(!"group" %in% colnames(pt_seurat@meta.data)) {
+  groups <- c("Healthy", "CKD")
+  pt_seurat$group <- sample(groups, ncol(pt_seurat), replace = TRUE)
+}
+
+group_names <- unique(pt_seurat$group)
+for (group_name in group_names) {
+  group_subset <- subset(pt_seurat, group == group_name)
+  p <- DimPlot(group_subset, 
+               group.by = "RNA_snn_res.0.1",
+               reduction = "umap",
+               label = TRUE,
+               label.size = 6) +
+    ggtitle(paste("Subclusters in", group_name)) +
+    theme_minimal() +
+    theme(legend.position = "right",
+          plot.title = element_text(hjust = 0.5, size = 16))
+  
+  print(p)
+}
+
+library(dplyr)
+library(tibble)
+DefaultAssay(pt_seurat) <- "RNA"
+clusters <- unique(pt_seurat@meta.data$RNA_snn_res.0.1)
+markers_list <- lapply(clusters, function(cluster) {
+  markers <- FindMarkers(
+    object = pt_seurat,
+    ident.1 = cluster,
+    group.by = "RNA_snn_res.0.1",  
+    assay = "RNA",
+    slot = "data",  
+    min.pct = 0.25,  
+    logfc.threshold = 0.5,
+    test.use = "wilcox"
+  )
+  markers %>%
+    as_tibble(rownames = "gene") %>%
+    mutate(cluster = as.character(cluster))  
+})
+all_markers <- bind_rows(markers_list)
+significant_markers <- all_markers %>%
+  filter(p_val_adj < 0.05) %>%
+  arrange(cluster, desc(avg_log2FC))
+
+library(writexl)
+write_xlsx(significant_markers, "PT亚群significant_markers.xlsx")
+top_markers_per_cluster <- significant_markers %>%
+  group_by(cluster) %>%
+  top_n(10, avg_log2FC)
+
+write_xlsx(top_markers_per_cluster, "PT亚群top10_markers.xlsx")
+cluster_annotation <- c(
+  "5" = "Normal",     
+  "4" = "Injury"
+)
+pt_seurat@meta.data$pt_subtype <- cluster_annotation[as.character(pt_seurat@meta.data$RNA_snn_res.0.1)]
+celltype_levels <- c("Normal", "Injury")
+pt_seurat@meta.data$pt_subtype <- factor(
+  pt_seurat@meta.data$pt_subtype,
+  levels = celltype_levels
+)
+my_colors <- c(
+  "Normal" = "#2B3856",
+  "Injury" = "#B71C1C"
+)
+p1 <- DimPlot(pt_seurat, 
+              group.by = "pt_subtype",
+              cols = my_colors,
+              pt.size = 0.8,
+              reduction = "umap") +
+  ggtitle("PT S1/S2  subclusters") +
+  labs(x = "UMAP 1", 
+       y = "UMAP 2",
+       color = "Cell States") + 
+  guides(color = guide_legend(
+    nrow = 1,
+    override.aes = list(size = 6)
+  )) +
+  theme(
+    plot.title = element_text(size = 32, hjust = 0.5, face = "plain"),
+    legend.position = "top",
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24), 
+    legend.justification = "center",
+    legend.key.size = unit(1.2, "cm"),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.title = element_text(size = 32),
+    axis.text = element_text(size = 32, color = "black"),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    axis.text.y = element_text(angle = 90, hjust = 0.5, vjust = 0.5),
+    plot.margin = margin(t = 0, r = 5, b = -20, l = 5)
+  )
+p1
+ggsave(
+  filename = "SubUMAP1.png",
+  plot = p1,
+  width = 8,
+  height = 8,  
+  dpi = 600
+)
+
+save(pt_seurat, file = "pt_seurat_S12.RData")
+load("pt_seurat_S12.RData")
+my_theme <- theme(
+  plot.title = element_text(size = 32, hjust = 0.5, face = "plain"),
+  legend.position = "top",            
+  legend.justification = "center" ,
+  legend.title = element_text(size = 24),     
+  legend.text = element_text(size = 24,margin = margin(r = 10 ,l=10)), 
+  legend.key.size = unit(1.2, "cm"),  
+  legend.spacing.x = unit(3, "cm"), 
+  legend.margin = margin(t = 20, b = 20),
+  axis.line = element_line(size = 1.5, color = "black"),
+  axis.ticks.length=grid::unit(0.3, "cm"),
+  axis.ticks = element_line(linewidth = 1.5),
+  axis.title = element_text(size = 32),
+  axis.text = element_text(size = 32, color = "black"),
+  axis.title.x = element_text(margin = margin(t = 15)),
+  axis.title.y = element_text(margin = margin(r = 15)))
+target_groups <- c("Healthy",  "CKD") 
+plots <- list()
+umap_range_x <- range(FetchData(pt_seurat, vars = "umap_1"))
+umap_range_y <- range(FetchData(pt_seurat, vars = "umap_2"))
+for (grp in target_groups) {
+  group_cells <- rownames(pt_seurat@meta.data)[pt_seurat@meta.data$group == grp]
+  
+  if (length(group_cells) > 0) {
+    grp_subset <- subset(pt_seurat, cells = group_cells)
+    p <- DimPlot(grp_subset,
+                 group.by = "pt_subtype",
+                 cols = my_colors,
+                 pt.size = 0.8,
+                 reduction = "umap") +
+      ggtitle(paste0(grp, " Group")) +
+      labs(x = "UMAP 1", 
+           y = "UMAP 2",
+           color = "Cell States") + 
+      guides(color = guide_legend(
+        nrow = 1,  
+        byrow = TRUE,
+        hjust = 0.5,
+        override.aes = list(size = 5)))+
+      coord_fixed (ratio = 0.6)+
+      my_theme +
+      xlim(umap_range_x[1], umap_range_x[2]) +
+      ylim(umap_range_y[1], umap_range_y[2])
+    plots[[grp]] <- p
+  } else {
+    warning(paste("Group", grp, "has no cells. Skipping..."))
+  }
+}
+plots
+
+for (grp in names(plots)) {
+  ggsave(
+    filename = paste0(grp, "_subUMAP2.png"),
+    plot = plots[[grp]],
+    width = 8,
+    height = 8,  
+    dpi = 600
+  )
+}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+custom_genes <- c( "MMP7", "ANXA1" ,  "TIMP1"  , "FLNA" ,   "PROM1"  , "KRT7"  ,  "WFDC2"  ,
+                    "S100A6",  "FABP1" ,  "ALDOB" ,  "ANGPTL3",
+                   "ALB", "SLC13A3" )
+valid_genes <- custom_genes[custom_genes %in% rownames(pt_seurat[["RNA"]])]
+custom_bubble  <- DotPlot(
+  object = pt_seurat,
+  features = valid_genes,
+  group.by = "pt_subtype",  
+  cols = c("#EDDA74","#5E5A80"),  
+  dot.scale = 16,
+  assay = "RNA"
+) +
+  ggtitle("Key Marker Genes in clusters of PT S1/2") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 30, color = "black"),
+    axis.text.y = element_text(size = 30, color = "black"),
+    axis.line = element_line(color = "black", linewidth = 1),  # 坐标轴线
+    axis.ticks = element_line(color = "black", linewidth = 1),  # 刻度线
+    axis.ticks.length = unit(0.25, "cm"),  # 刻度线长度
+    axis.title = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 30),
+    legend.text = element_text(size = 30),
+    legend.key.size = unit(1, "cm"),
+    legend.text.align = 1,  # 右对齐文本
+    panel.grid.major = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 30, color = "black")
+  ) +
+  labs(
+    color = "Expression Level",
+    size = "% Cells Expressing"
+  ) +
+  coord_flip()  
+custom_bubble 
+ggsave(
+  filename = "subS12_top marker2.png",
+  plot = custom_bubble,
+  width = 14,
+  height = 8,
+  dpi = 600
+)
+celltype_counts <- pt_seurat@meta.data %>%
+  count(group, pt_subtype) %>%
+  group_by(group) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ungroup()
+celltype_counts$group <- factor(celltype_counts$group, levels = c("Healthy", "CKD"))
+celltype_counts$pt_subtype <- factor(celltype_counts$pt_subtype, 
+                                     levels = c( "Injury","Normal"))
+color_palette <- c(
+  "Normal" = "#2B3856",
+  "Injury" = "#B71C1C"
+)
+c <- ggplot(celltype_counts, aes(x = group, y = proportion,fill = pt_subtype)) +
+  geom_col(position = "fill", width = 0.6) +  
+  geom_text(
+    aes(label = scales::percent(proportion, accuracy = 0.1)),
+    position = position_fill(vjust = 0.5),
+    color = "white",
+    size = 7
+  ) +
+  scale_fill_manual(values = color_palette, breaks = c("Normal", "Injury")) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = "",
+    y = "Percentage of Cells",
+    fill = "Cell States"
+  ) +
+  coord_fixed(ratio =1.8)+
+  theme_classic() +
+  theme(
+    text = element_text(size = 22),
+    axis.title = element_text(size = 30),
+    axis.text = element_text(size = 30, color = "black"),
+    axis.text.x = element_text(size = 30),
+    axis.ticks = element_line(color = "black",linewidth = 1.5),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    legend.position = "top",
+    legend.title = element_text(size = 24,margin = margin(r = 20)),
+    legend.spacing.x = unit(2, "cm"),  # 增加图例项水平间距
+    legend.text = element_text(size = 24,margin = margin(r = 10,l = 10)),
+    legend.key.size = unit(1, "cm"),
+    plot.margin = margin(t = 0, r = 5, b = -15, l = 5)
+  ) +
+  guides(
+    fill = guide_legend(nrow = 1, byrow = TRUE
+    )
+  )
+c
+ggsave(
+  filename = "细胞比例.png",
+  plot = c,
+  width = 9,
+  height = 8,
+  dpi = 600
+)
+fatty_acid_genes <- list(c(
+  "CD36", "SLC27A1", "SLC27A2", "SLC27A3", "SLC27A4", "FABP1", "FABP3", "FABP4", 
+  "ACACA", "ACACB", "FASN", "SCD", "ELOVL1", "ELOVL2", "ELOVL3", "ELOVL4", "ELOVL5", "ELOVL6", "ELOVL7",
+  "ACSL1", "ACSL3", "ACSL4", "ACSL5", "ACSL6", 
+  "CPT1A", "CPT1B", "CPT2", "SLC25A20",  
+  "ACADVL", "ACADM", "ACADS", "ACADSB",  
+  "ECH1", "ECHS1",                       
+  "HADHA", "HADHB",                      
+  "ACAA1", "ACAA2",                     
+  "ACOX1", "ACOX2", "ACOX3", "PECR", 
+  "CYP4A11", "CYP4A22", "CYP4B1", 
+  "PPARA", "PPARD", "PPARG", "PPARGC1A", 
+  "SREBF1", "SREBF2",                    
+  "MLXIPL"                              
+))
+
+pt_seurat <- AddModuleScore(
+  object = pt_seurat,
+  features = fatty_acid_genes,
+  name = "FattyAcidScore",  
+  ctrl = 1000
+)
+head(pt_seurat$FattyAcidScore1)
+pt_seurat$FattyAcidScore1 <- pt_seurat$FattyAcidScore1 - min(pt_seurat$FattyAcidScore1)
+head(pt_seurat$FattyAcidScore1)
+save(pt_seurat,file = "pt_sub_annotation_4亚群.RData")
+setwd("D:/guojl/研究生/课题/CKD/scRNA/An atlas of healthy and injured cell states and niches in the human kidney/test/去双细胞")
+load("pt_sub_annotation_4亚群.RData")
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+score_of_interest <- "ALDH2"  
+expression_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "pt_subtype", score_of_interest)
+)
+filtered_data <- expression_data %>%
+  dplyr::filter(
+    pt_subtype %in% c("Normal", "Injury"),
+    group == "CKD" 
+  ) %>%
+  mutate(pt_subtype = factor(pt_subtype, levels = c("Normal", "Injury")))
+if (all(c("Normal", "Injury") %in% filtered_data$pt_subtype)) {
+  normal_data <- filtered_data %>% 
+    filter(pt_subtype == "Normal") %>% 
+    pull(score_of_interest)
+  
+  injury_data <- filtered_data %>% 
+    filter(pt_subtype == "Injury") %>% 
+    pull(score_of_interest)
+  if (length(normal_data) >= 2 && length(injury_data) >= 2) {
+    p_value <- wilcox.test(normal_data, injury_data)$p.value
+  } else {
+    p_value <- NA_real_
+  }
+} else {
+  p_value <- NA_real_
+}
+comparison_stats <- tibble(
+  group = "CKD",
+  p_value = p_value,
+  p_label = case_when(
+    is.na(p_value) ~ "",
+    p_value < 0.001 ~ "***",
+    p_value < 0.01 ~ "**",
+    p_value < 0.05 ~ "*",
+    TRUE ~ "ns"
+  )
+)
+max_expression <- max(filtered_data[[score_of_interest]], na.rm = TRUE)
+x_levels <- levels(interaction(filtered_data$group, filtered_data$pt_subtype))
+comparison_stats <- comparison_stats %>% 
+  mutate(
+    y_pos = max_expression * 1.15,
+    xmin = which(x_levels == "CKD.Normal"),
+    xmax = which(x_levels == "CKD.Injury")
+  )
+p <- ggplot(filtered_data,
+            aes(x = interaction(group, pt_subtype),
+                y = !!sym(score_of_interest),
+                fill = pt_subtype)) +
+  geom_violin(
+    width = 0.4,
+    scale = "width",
+    trim = TRUE,
+    adjust = 2,
+    linewidth = 0.2
+  ) +
+  scale_fill_manual(
+    values = c("Normal" = "#2B3856", "Injury" = "#B71C1C"),
+    guide = "none"
+  ) +
+  scale_x_discrete(
+    labels = function(x) {
+      parts <- strsplit(x, "\\.")
+      sapply(parts, function(p) p[2])
+    }
+  ) +
+  scale_y_continuous(
+    limits = c(0, 5),
+    breaks = scales::pretty_breaks(n = 4),
+    expand = expansion(mult = c(0, 0))
+  ) + 
+  labs(
+    title = "ALDH2 Expression in CKD",
+    x = "",
+    y = "Expression Level"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 0),  
+      angle = 0,
+      vjust = 0  
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+if (!is.na(comparison_stats$p_value)) {
+  p_signif <- p +
+    geom_segment(
+      data = comparison_stats,
+      aes(x = xmin, 
+          xend = xmax,
+          y = y_pos, 
+          yend = y_pos),
+      inherit.aes = FALSE,
+      size = 0.5,
+      color = "black",
+      arrow = arrow(
+        ends = "both",
+        angle = 90,
+        length = unit(2.5, "mm"),
+        type = "open"
+      )
+    ) +
+    geom_text(
+      data = comparison_stats,
+      aes(x = mean(c(xmin, xmax)), 
+          y = y_pos * 1.05-0.2, 
+          label = p_label),
+      inherit.aes = FALSE,
+      size = 12,
+      vjust = 0
+    )
+} else {
+  p_signif <- p
+}
+print(p_signif)
+ggsave(
+  filename = "subpt_ALDH22.png",
+  plot = p_signif,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+
+score_of_interest <- "collagen.score"
+score_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "pt_subtype", score_of_interest)
+)
+filtered_data <- score_data %>%
+  dplyr::filter(
+    pt_subtype %in% c("Normal", "Injury"),
+    group == "CKD" 
+  ) %>%
+  mutate(pt_subtype = factor(pt_subtype, levels = c("Normal", "Injury")))
+if (all(c("Normal", "Injury") %in% filtered_data$pt_subtype)) {
+  normal_data <- filtered_data %>% 
+    filter(pt_subtype == "Normal") %>% 
+    pull(score_of_interest)
+  
+  injury_data <- filtered_data %>% 
+    filter(pt_subtype == "Injury") %>% 
+    pull(score_of_interest)
+  if (length(normal_data) >= 2 && length(injury_data) >= 2) {
+    p_value <- wilcox.test(normal_data, injury_data)$p.value
+  } else {
+    p_value <- NA_real_
+  }
+} else {
+  p_value <- NA_real_
+}
+comparison_stats <- tibble(
+  group = "CKD",
+  p_value = p_value,
+  p_label = case_when(
+    is.na(p_value) ~ "",
+    p_value < 0.001 ~ "***",
+    p_value < 0.01 ~ "**",
+    p_value < 0.05 ~ "*",
+    TRUE ~ "ns"
+  ))
+violin_height <- max(filtered_data[[score_of_interest]], na.rm = TRUE) * 1.15
+max_values <- filtered_data %>%
+  group_by(pt_subtype) %>%
+  summarise(max_value = max(!!sym(score_of_interest), na.rm = TRUE))
+y_pos <- max(max_values$max_value) * 1.15
+x_levels <- levels(interaction(filtered_data$group, filtered_data$pt_subtype))
+comparison_stats <- comparison_stats %>% 
+  mutate(
+    y_pos = y_pos,
+    xmin = which(x_levels == "CKD.Normal"),  
+    xmax = which(x_levels == "CKD.Injury")   
+  )
+p <- ggplot(filtered_data, 
+            aes(x = interaction(group, pt_subtype), 
+                y = !!sym(score_of_interest), 
+                fill = pt_subtype)) +
+  geom_violin(
+    width = 0.6, 
+    scale = "width",
+    trim = TRUE,
+    adjust = 0.8,
+    linewidth = 0.2
+  ) +
+  scale_fill_manual(
+    values = c("Normal" = "#2B3856", "Injury" = "#B71C1C"),
+    guide = "none"
+  ) +
+  scale_x_discrete(
+    labels = function(x) {
+      parts <- strsplit(x, "\\.")
+      sapply(parts, function(p) p[2])
+    }
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1.2, na.rm = TRUE),
+    breaks = c(0,0.4,0.8,1.2),
+    expand = expansion(mult = c(0, 0))
+  ) + 
+  labs(
+    title = "Collagen accumulation in CKD",
+    x = "",
+    y = "Collagen Score"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 3),
+      angle = 0,
+      vjust = 0.5
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+if (!is.na(comparison_stats$p_value)) {
+  p_signif1 <- p +
+    geom_segment(
+      data = comparison_stats,
+      aes(x = xmin, 
+          xend = xmax,
+          y = y_pos, 
+          yend = y_pos),
+      inherit.aes = FALSE,
+      size = 0.5,
+      color = "black",
+      arrow = arrow(
+        ends = "both",
+        angle = 90,
+        length = unit(2.5, "mm"),
+        type = "open"
+      )
+    ) +
+    geom_text(
+      data = comparison_stats,
+      aes(x = mean(c(xmin, xmax)), 
+          y = y_pos * 1.05- 0.05,
+          label = p_label),
+      inherit.aes = FALSE,
+      size = 12,
+      vjust = 0
+    )
+} else {
+  p_signif <- p
+}
+print(p_signif1)
+ggsave(
+  filename = "subpt_collagen2.png",
+  plot = p_signif1,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+
+score_of_interest <- "FattyAcidScore1"
+score_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "pt_subtype", score_of_interest)
+)
+filtered_data <- score_data %>%
+  dplyr::filter(
+    pt_subtype %in% c("Normal", "Injury"),
+    group == "CKD")  
+  mutate(pt_subtype = factor(pt_subtype, levels = c("Normal", "Injury")))
+if (all(c("Normal", "Injury") %in% filtered_data$pt_subtype)) {
+  normal_data <- filtered_data %>% 
+    filter(pt_subtype == "Normal") %>% 
+    pull(score_of_interest)
+  
+  injury_data <- filtered_data %>% 
+    filter(pt_subtype == "Injury") %>% 
+    pull(score_of_interest)
+  if (length(normal_data) >= 2 && length(injury_data) >= 2) {
+    p_value <- wilcox.test(normal_data, injury_data)$p.value
+  } else {
+    p_value <- NA_real_
+  }
+} else {
+  p_value <- NA_real_
+}
+
+comparison_stats <- tibble(
+  group = "CKD",
+  p_value = p_value,
+  p_label = case_when(
+    is.na(p_value) ~ "",
+    p_value < 0.001 ~ "***",
+    p_value < 0.01 ~ "**",
+    p_value < 0.05 ~ "*",
+    TRUE ~ "ns"
+  )
+)
+
+violin_height <- max(filtered_data[[score_of_interest]], na.rm = TRUE) * 1.15
+max_values <- filtered_data %>%
+  group_by(pt_subtype) %>%
+  summarise(max_value = max(!!sym(score_of_interest), na.rm = TRUE))
+y_pos <- max(max_values$max_value) * 1.15
+x_levels <- levels(interaction(filtered_data$group, filtered_data$pt_subtype))
+
+# 更新comparison_stats
+comparison_stats <- comparison_stats %>% 
+  mutate(
+    y_pos = y_pos,
+    xmin = which(x_levels == "CKD.Normal"),  
+    xmax = which(x_levels == "CKD.Injury")  
+  )
+p <- ggplot(filtered_data, 
+            aes(x = interaction(group, pt_subtype), 
+                y = !!sym(score_of_interest), 
+                fill = pt_subtype)) +
+  geom_violin(
+    width = 0.6, 
+    scale = "width",
+    trim = TRUE,
+    adjust = 0.8,
+    linewidth = 0.2
+  ) +
+  scale_fill_manual(
+    values = c("Normal" = "#2B3856", "Injury" = "#B71C1C"),
+    guide = "none"
+  ) +
+  scale_x_discrete(
+    labels = function(x) {
+      parts <- strsplit(x, "\\.")
+      sapply(parts, function(p) p[2])
+    }
+  ) +
+  scale_y_continuous(
+    limits = c(0, max(filtered_data[[score_of_interest]] * 1.3, na.rm = TRUE)),
+    breaks = scales::pretty_breaks(n = 4),
+    expand = expansion(mult = c(0, 0))
+  ) + 
+  labs(
+    title = "Fatty Acid Metabolism in CKD",
+    x = "",
+    y = "Fatty Acid Score"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 3),
+      angle = 0,
+      vjust = 0.5
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+if (!is.na(comparison_stats$p_value)) {
+  p_signif2 <- p +
+    geom_segment(
+      data = comparison_stats,
+      aes(x = xmin, 
+          xend = xmax,
+          y = y_pos, 
+          yend = y_pos),
+      inherit.aes = FALSE,
+      size = 0.5,
+      color = "black",
+      arrow = arrow(
+        ends = "both",
+        angle = 90,
+        length = unit(2.5, "mm"),
+        type = "open"
+      )
+    ) +
+    geom_text(
+      data = comparison_stats,
+      aes(x = mean(c(xmin, xmax)), 
+          y = y_pos * 1.05- 0.05,
+          label = p_label),
+      inherit.aes = FALSE,
+      size = 12,
+      vjust = 0
+    )
+} else {
+  p_signif <- p
+}
+print(p_signif2)
+ggsave(
+  filename = "subpt_FAO2.png",
+  plot = p_signif2,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+library(Seurat)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(forcats)  
+perform_GSEA_analysis <- function(group_name) {
+  group_cells <- subset(pt_seurat,
+                        group == group_name &
+                          pt_subtype %in% c("Normal", "Injury"))
+  Idents(group_cells) <- "pt_subtype"
+  pt_markers <- FindMarkers(
+    object = group_cells,
+    ident.1 = "Injury",
+    ident.2 = "Normal",
+    logfc.threshold = 0,
+    min.pct = 0.05,
+    test.use = "wilcox"
+  )
+  pt_markers$gene <- rownames(pt_markers)
+  gene_list <- pt_markers$avg_log2FC
+  names(gene_list) <- pt_markers$gene
+  gene_list <- sort(gene_list, decreasing = TRUE)
+  converted <- bitr(names(gene_list), 
+                    fromType = "SYMBOL",
+                    toType = "ENTREZID",
+                    OrgDb = org.Hs.eg.db)
+  converted <- distinct(converted, ENTREZID, .keep_all = TRUE)
+  gene_list <- gene_list[converted$SYMBOL]
+  names(gene_list) <- converted$ENTREZID
+  options(timeout = 1000)
+  set.seed(123)
+  gsea_result <- gseKEGG(
+    geneList = gene_list,
+    organism = "hsa",
+    keyType = "kegg",
+    pvalueCutoff = 0.1,
+    pAdjustMethod = "BH",
+    verbose = FALSE
+  )
+  if (is.null(gsea_result) || nrow(gsea_result) < 1) {
+    return(NULL)
+  }
+  
+  gsea_df <- as.data.frame(gsea_result) %>%
+    mutate(
+      Group = group_name,
+      Direction = ifelse(NES > 0, "Enriched in Injury", "Enriched in Normal"),
+      Pathway = gsub(" - Homo sapiens \\(human\\)", "", Description),
+      Pathway = gsub("Homo sapiens: ", "", Pathway)
+    ) %>%
+    dplyr::select(ID, Pathway, NES, pvalue, p.adjust, qvalue, core_enrichment, Group, Direction)
+  
+  return(gsea_df)
+}
+healthy_gsea <- perform_GSEA_analysis("Healthy")
+ckd_gsea <- perform_GSEA_analysis("CKD")
+all_gsea <- bind_rows(healthy_gsea, ckd_gsea) %>%
+  filter(p.adjust < 0.05 & qvalue < 0.2) %>%  # 使用双重筛选
+  group_by(Group, Direction) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = 10) %>%
+  ungroup()
+library(openxlsx)
+excel_file <- "GSEA_Analysis_Results.xlsx"
+wb <- createWorkbook()
+addWorksheet(wb, "Full_GSEA_Results")
+addWorksheet(wb, "Top_Pathways")
+writeData(wb, sheet = "Top_Pathways", all_gsea)
+saveWorkbook(wb, excel_file, overwrite = TRUE)
+message(paste("GSEA results saved to:", excel_file))
+if (!is.null(all_gsea) && nrow(all_gsea) > 0) {
+  all_gsea <- all_gsea %>%
+    mutate(
+      Pathway = str_to_sentence(Pathway),
+      Pathway = ifelse(nchar(Pathway) > 1000,
+                       paste0(str_trunc(Pathway, 1000, side = "right"), "..."),
+                       Pathway)
+    )
+  healthy_data <- all_gsea %>% filter(Group == "Healthy")
+  ckd_data <- all_gsea %>% filter(Group == "CKD")
+  create_gsea_plot <- function(data, group_name) {
+    if (nrow(data) == 0) {
+      message(paste0("No significant pathways found for ", group_name, " group."))
+      return(NULL)
+    }
+    
+    ggplot(data,
+           aes(x = NES, 
+               y = fct_reorder(Pathway, NES),
+               fill = Direction)) +
+      geom_col(width = 0.7, alpha = 0.85, color = "black", size = 0.3) +
+      scale_fill_manual(
+        name = "Enrichment Direction",
+        values = c(
+          "Enriched in Normal" = "#2B3856",
+          "Enriched in Injury" = "#B71C1C"
+        ),
+        drop = FALSE,
+        breaks = c("Enriched in Normal", "Enriched in Injury")  
+      ) +
+      geom_vline(xintercept = 0, linetype = "solid", size = 0.7, color = "black") +
+      labs(
+        x = "",
+        y = NULL,
+        title = paste("Normalized Enrichment Score (NES) in CKD"),
+        subtitle = "",
+        fill = "Enrichment Direction"
+      ) +
+      scale_x_continuous(
+        limits = c(-3.5, 3),
+        breaks = c(-3.5, 0, 3)  
+      )  +
+      theme_minimal(base_size = 14) +
+      theme(
+        text = element_text(family = "Arial"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(
+          color = "black",       
+          fill = NA,              
+          linewidth = 1.5
+        ),
+        axis.text.y = element_text(size = 28, color = "black", margin = margin(t = 10,b=10)),
+        axis.text.x = element_text(size = 28, color = "black"),
+        axis.title.x = element_text(size = 28, margin = margin(t = 10)),
+        plot.title = element_text(
+          hjust = 0.5,
+          size = 32,
+          margin = margin(b = 10)
+        ),
+        axis.line = element_line(size = 1.5, color = "black"),
+        axis.ticks.length=grid::unit(0.3, "cm"),
+        axis.ticks = element_line(linewidth = 1.5),
+        legend.position = "top",
+        legend.title = element_text(size = 28,margin = margin(r = 30)),
+        legend.text = element_text(size = 28,margin = margin(r = 20 ,l=10)),
+        legend.spacing.x = unit(2, "cm"),  
+        legend.margin = margin(t = 20, b = 20),
+        plot.margin = margin(15, 20, 15, 100)
+      )
+  }
+  if (nrow(healthy_data) > 0) {
+    healthy_plot <- create_gsea_plot(healthy_data, "Healthy")
+    print(healthy_plot)
+    ggsave(
+      filename = "GSEA_Analysis_Healthy2.png",
+      plot = healthy_plot,
+      width = 24,
+      height = 12,
+      dpi = 600
+    )
+  }
+  if (nrow(ckd_data) > 0) {
+    ckd_plot <- create_gsea_plot(ckd_data, "CKD")
+    print(ckd_plot)
+    ggsave(
+      filename = "GSEA_Analysis_CKD2.png",
+      plot = ckd_plot,
+      width = 24,
+      height =12,
+      dpi = 600
+    )
+  }
+  
+} else {
+  message("No significant pathways found in GSEA analysis.")
+}
+library(ggpubr)
+target_groups <- c("Healthy","CKD")
+target_clusters <- c("Normal", "Injury")
+combined_data <- pt_seurat@meta.data %>%
+  dplyr::select(group, pt_subtype, FattyAcidScore1, collagen.score) %>%
+  cbind(FetchData(pt_seurat, vars = "ALDH2")) %>%
+  filter(
+    group %in% target_groups,
+    pt_subtype %in% target_clusters,
+    ALDH2 > 0
+  ) %>%
+  mutate(Cluster = pt_subtype)  
+p_fatty <- ggplot(combined_data, 
+                  aes(x = ALDH2, y = FattyAcidScore1))+
+  geom_point(aes(color = Cluster), shape = 16, size = 3) +
+  geom_smooth(method = "lm", se = TRUE, 
+              color = "black", fill = "black", 
+              linetype = "solid", size = 1.2) +
+  scale_color_manual(values = c("Normal" = "#2B3856", "Injury" = "#B71C1C")) +
+  labs(
+    title = "",
+    x = "ALDH2 Expression",
+    y = "Fatty Acid Score",
+    color = "Cell States",
+    shape = "Cell States"
+  ) +
+  theme_pubr(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 26),
+    legend.position = "top",
+    legend.title = element_text(size = 28,margin = margin(r = 30)),
+    legend.text = element_text(size = 28,margin = margin(r = 20 ,l=10)),
+    legend.margin = margin(t=5,b = 10),  
+    legend.spacing.x = unit(2, "cm"),  # 图例整体横向间距# 增加纵向间距
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.title.x = element_text(size = 32, margin = margin(t = 10)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 3),
+      angle = 0,
+      vjust = 0.5
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  ) +
+  stat_cor(
+    method = "spearman",
+    mapping = aes(label = paste0(
+      "plain(R)~'='~", signif(after_stat(r), 2),
+      "*', '*",
+      "italic(P)~'='~",
+      ifelse(after_stat(p) < 1e-100,
+             "'< 1e-100'",
+             formatC(after_stat(p), format = "e", digits = 1))
+    )),
+    label.sep = ",",
+    label.x = Inf, 
+    label.y = max(combined_data$collagen.score) * 1.05,
+    hjust = 1, vjust = 1,
+    size = 8.8,
+    color = "black"
+  ) +
+  coord_cartesian(clip = "off")+
+  guides(color = guide_legend(
+    override.aes = list(shape = 16))) # 强制图例中的点形状为圆形
+
+p_fatty
+p_collagen <- ggplot(combined_data, 
+                     aes(x = ALDH2, y = collagen.score))+
+  geom_point(aes(color = Cluster), shape = 16, size = 3) +
+  geom_smooth(method = "lm", se = TRUE, 
+              color = "black", fill = "black", 
+              linetype = "solid", size = 1.2) +
+  scale_color_manual(values = c("Normal" = "#2B3856", "Injury" = "#B71C1C")) +
+  labs(
+    title = "",
+    x = "ALDH2 Expression",
+    y = "Collagen Score",
+    color = "Cell States",
+    shape = "Cell States"
+  ) +
+  theme_pubr(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 26),
+    legend.position = "top",
+    legend.title = element_text(size = 28,margin = margin(r = 30)),
+    legend.text = element_text(size = 28,margin = margin(r = 20 ,l=10)),
+    legend.margin = margin(t=5,b = 10),  
+    legend.spacing.x = unit(2, "cm"),  
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.title.x = element_text(size = 32, margin = margin(t = 10)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 3),
+      angle = 0,
+      vjust = 0.5
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  ) +
+  stat_cor(
+    method = "spearman",
+    mapping = aes(label = paste0(
+      "plain(R)~'='~", signif(after_stat(r), 2),
+      "*', '*",
+      "italic(P)~'='~",
+      ifelse(after_stat(p) < 1e-200,
+             "'< 1e-100'",
+             formatC(after_stat(p), format = "e", digits = 1))
+    )),
+    label.sep = ",",
+    label.x = Inf,
+    label.y = max(combined_data$collagen.score) * 1.18,
+    hjust = 1, vjust = 1,
+    size = 8.8,
+    color = "black",
+    fontface = "plain",  
+    family = "Arial"     
+  ) +
+  coord_cartesian(clip = "off")+
+  guides(color = guide_legend(
+    override.aes = list(shape = 16))) 
+p_collagen
+ggsave("ALDH2_vs_FattyAcid_combined2.png", p_fatty, 
+       width = 8, height = 8, dpi = 600)
+ggsave("ALDH2_vs_Collagen_combined2.png", p_collagen, 
+       width = 8, height = 8, dpi = 600)
+print(p_fatty)
+print(p_collagen)
+
+p_emt_genes <- c("VIM", 
+                 "CDH2", 
+                 "COL1A1", 
+                 "COL3A1",
+                 "MMP2", 
+                 "TGFB1") 
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)
+expression_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "pt_subtype", p_emt_genes)
+)
+long_data <- expression_data %>%
+  dplyr::filter(
+    pt_subtype %in% c("Normal", "Injury"),
+    group == "CKD"  
+  ) %>%
+  mutate(pt_subtype = factor(pt_subtype, levels = c("Normal", "Injury"))) %>%
+  pivot_longer(
+    cols = all_of(p_emt_genes),
+    names_to = "gene",
+    values_to = "expression"
+  ) %>%
+  mutate(gene = factor(gene, levels = p_emt_genes))  
+comparison_stats <- long_data %>%
+  group_by(gene) %>%
+  summarise(
+    p_value = {
+      normal <- expression[pt_subtype == "Normal"]
+      injury <- expression[pt_subtype == "Injury"]
+      
+      if (length(normal) >= 2 && length(injury) >= 2) {
+        wilcox.test(normal, injury)$p.value
+      } else {
+        NA_real_
+      }
+    }
+  ) %>%
+  mutate(
+    p_label = case_when(
+      is.na(p_value) ~ "",
+      p_value < 0.001 ~ "***",
+      p_value < 0.01 ~ "**",
+      p_value < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+gene_max <- long_data %>%
+  group_by(gene) %>%
+  summarise(max_exp = max(expression, na.rm = TRUE))
+comparison_stats <- comparison_stats %>%
+  left_join(gene_max, by = "gene") %>%
+  mutate(
+    y_pos = max_exp * 1.15, 
+    gene_index = as.numeric(gene),
+    xmin = gene_index ,  
+    xmax = gene_index   
+  )
+p <- ggplot(long_data, aes(x = gene, y = expression)) +
+  geom_violin(
+    aes(fill = pt_subtype),
+    position = position_dodge(width = 0.8),
+    width = 0.7,
+    scale = "width",
+    trim = TRUE,
+    linewidth = 0.2
+  ) +
+  geom_segment(
+    data = comparison_stats,
+    aes(x = gene_index-0.2, xend = gene_index+0.2, 
+        y = y_pos, yend = y_pos),
+    size = 0.5,
+    color = "black",
+    inherit.aes = FALSE,
+    arrow = arrow(
+      ends = "both",
+      angle = 90,
+      length = unit(2.5, "mm"),
+      type = "open"
+    )
+  ) +
+  geom_text(
+    data = comparison_stats,
+    aes(x = gene_index, y = y_pos * 1.05-0.15, label = p_label),
+    size = 12,
+    vjust = 0,
+    inherit.aes = FALSE
+  ) +
+  scale_fill_manual(
+    name = "Cell Type",
+    values = c("Normal" = "#2B3856", "Injury" = "#B71C1C")
+  ) +
+  scale_y_continuous(
+    limits = c(0, 6),
+    breaks = scales::pretty_breaks(n = 4),
+    expand = expansion(mult = c(0, 0))
+  ) + 
+  labs(x = "", 
+       y = "Expression Level",
+       title = "p-EMT Genes Expression in CKD",
+       color = "Cell Type") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.x = element_text(size = 32),
+    axis.title.y = element_text(size = 32,margin = margin(r = 10)),
+    axis.text.x = element_text(
+      size = 32,
+      color = "black",
+      angle = 0,
+      vjust = 1,
+      hjust = 0.5,
+      margin = margin(t=5)
+    ),
+    axis.text.y = element_text(size = 32),
+    axis.ticks = element_line(color = "black",linewidth = 1.5),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.key.size = unit(0.8, "cm"),
+    legend.text = element_text(size = 28,margin = margin(r = 20 ,l=10)), 
+    legend.spacing.x = unit(6, "cm"),  
+    legend.title = element_text(size = 28),
+    plot.margin = margin(t = 5, r = 5, b = -8, l = 5)
+  )
+p
+ggsave(
+  filename = "p_emt_genes_combined2.png",
+  plot = p,
+  width = 12, 
+  height = 8,
+  dpi = 600
+)
+
+load("pt_seurat_S12.RData")
+aldh2_expression <- FetchData(pt_seurat, vars = "ALDH2")$ALDH2
+expressing_cells <- sum(aldh2_expression > 0) / length(aldh2_expression) * 100
+cat(sprintf("表达ALDH2的细胞比例: %.2f%%\n", expressing_cells))
+non_zero_aldh2 <- aldh2_expression[aldh2_expression > 0]
+threshold <- median(non_zero_aldh2)
+cat(sprintf("ALDH2表达阈值(中位数): %.4f\n", threshold))
+
+pt_seurat$ALDH2_group <- ifelse(
+  aldh2_expression >= threshold,
+  "ALDH2(High)",
+  ifelse(aldh2_expression > 0,
+         "ALDH2(Low)",
+         "Non-Expressing")
+)
+group_counts <- table(pt_seurat$ALDH2_group)
+cat("各组细胞数量:\n")
+print(group_counts)
+prop_high <- group_counts["ALDH2(High)"] / sum(group_counts[c("ALDH2(High)", "ALDH2(Low)")]) * 100
+cat(sprintf("高表达组在表达细胞中的比例: %.2f%%\n", prop_high))
+
+# 4. 可视化分组结果
+aldh2_expressing <- subset(pt_seurat, subset = ALDH2_group %in% c("ALDH2(High)", "ALDH2(Low)"))
+DimPlot(aldh2_expressing,
+        group.by = "ALDH2_group",
+        cols = c("ALDH2(High)" = "#7F5A58", "ALDH2(Low)" = "#9CB071"),  
+        label = FALSE) +               
+  xlab("UMAP 1") + 
+  ylab("UMAP 2") + 
+  ggtitle("Annotation by ALDH2 Expression") +
+  theme(
+    plot.title = element_text(size = 32, hjust = 0.5, face = "plain"),
+    legend.position = "top",           
+    legend.justification = "center" ,
+    legend.title = element_blank(),    
+    legend.text = element_text(size = 28,margin = margin(r = 20 ,l=10)), 
+    legend.key.size = unit(0.8, "cm"),  
+    legend.spacing.x = unit(2, "cm"), 
+    legend.margin = margin(t = 20, b = 20),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.title = element_text(size = 32),
+    axis.text = element_text(size = 32, color = "black"),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
+    plot.margin = margin(t = 5, r = -15, b = 5, l = 5)
+  ) +
+  guides(color = guide_legend(          
+    override.aes = list(size = 4),     
+    direction = "horizontal",           
+    label.position = "right",           
+    nrow = 1
+  ))
+
+ggsave("ALDH2 EXPRESSION_UMAP222.png", 
+       width = 8, height = 8, dpi = 600)
+pt_aldh2 <- subset(pt_seurat, 
+                   subset = ALDH2_group %in% c("ALDH2(High)", "ALDH2(Low)"))
+
+
+score_of_interest <- "ALDH2"  
+expression_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "ALDH2_group", score_of_interest)
+)
+
+filtered_data <- expression_data %>%
+  dplyr::filter(
+    ALDH2_group %in% c("ALDH2(High)", "ALDH2(Low)"),
+    group == "CKD"  
+  ) %>%
+  mutate(ALDH2_group = factor(ALDH2_group, levels = c("ALDH2(High)", "ALDH2(Low)")))
+if (all(c("ALDH2(High)", "ALDH2(Low)") %in% filtered_data$ALDH2_group)) {
+  normal_data <- filtered_data %>% 
+    filter(ALDH2_group == "ALDH2(High)") %>% 
+    pull(score_of_interest)
+  
+  injury_data <- filtered_data %>% 
+    filter(ALDH2_group == "ALDH2(Low)") %>% 
+    pull(score_of_interest)
+  if (length(normal_data) >= 2 && length(injury_data) >= 2) {
+    p_value <- wilcox.test(normal_data, injury_data)$p.value
+  } else {
+    p_value <- NA_real_
+  }
+} else {
+  p_value <- NA_real_
+}
+comparison_stats <- tibble(
+  group = "CKD",
+  p_value = p_value,
+  p_label = case_when(
+    is.na(p_value) ~ "",
+    p_value < 0.001 ~ "***",
+    p_value < 0.01 ~ "**",
+    p_value < 0.05 ~ "*",
+    TRUE ~ "ns"
+  )
+)
+max_expression <- max(filtered_data[[score_of_interest]], na.rm = TRUE)
+x_levels <- levels(interaction(filtered_data$group, filtered_data$ALDH2_group))
+comparison_stats <- comparison_stats %>% 
+  mutate(
+    y_pos = max_expression * 1.15,
+    xmin = which(x_levels == "CKD.ALDH2(High)"),
+    xmax = which(x_levels == "CKD.ALDH2(Low)")
+  )
+
+p <- ggplot(filtered_data, 
+            aes(x = interaction(group, ALDH2_group), 
+                y = !!sym(score_of_interest), 
+                fill = ALDH2_group)) +
+  geom_boxplot(
+    width = 0.4,         
+    notch = FALSE,       
+    outlier.size = 1.5,   
+    outlier.alpha = 0.6,  
+    size = 0.8,           
+    fatten = 1.2          
+  ) +
+  scale_fill_manual(
+    values = c("ALDH2(Low)" = "#9CB071", "ALDH2(High)" = "#7F5A58"),
+    guide = "none"
+  ) +
+  scale_x_discrete(
+    labels = function(x) {
+      parts <- strsplit(x, "\\.")
+      sapply(parts, function(p) p[2])
+    }
+  ) +
+  scale_y_continuous(
+    limits = c(0, 5),
+    breaks = scales::pretty_breaks(n = 4),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    title = "ALDH2 Expression in CKD",
+    x = "",
+    y = "Expression Level"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 0),
+      angle = 0,
+      vjust = 0
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+
+if (!is.na(comparison_stats$p_value)) {
+  p_signif <- p +
+    geom_segment(
+      data = comparison_stats,
+      aes(x = xmin, 
+          xend = xmax,
+          y = y_pos, 
+          yend = y_pos),
+      inherit.aes = FALSE,
+      size = 0.5,
+      color = "black",
+      arrow = arrow(
+        ends = "both",
+        angle = 90,
+        length = unit(2.5, "mm"),
+        type = "open"
+      )
+    ) +
+    geom_text(
+      data = comparison_stats,
+      aes(x = mean(c(xmin, xmax)), 
+          y = y_pos * 1.05-0.2, 
+          label = p_label),
+      inherit.aes = FALSE,
+      size = 12,
+      vjust = 0
+    )
+} else {
+  p_signif <- p
+}
+
+print(p_signif)
+ggsave(
+  filename = "subpt222_ALDH22.png",
+  plot = p_signif,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+
+
+library(Seurat)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(forcats)  
+
+perform_GSEA_analysis <- function(group_name) {
+  group_cells <- subset(pt_aldh2,
+                        group == group_name &
+                          ALDH2_group %in% c("ALDH2(High)", "ALDH2(Low)"))
+
+  Idents(group_cells) <- "ALDH2_group"
+  pt_markers <- FindMarkers(
+    object = group_cells,
+    ident.1 = "ALDH2(High)",
+    ident.2 = "ALDH2(Low)",
+    logfc.threshold = 0,
+    min.pct = 0.05,
+    test.use = "wilcox"
+  )
+  
+  pt_markers$gene <- rownames(pt_markers)
+
+  gene_list <- pt_markers$avg_log2FC
+  names(gene_list) <- pt_markers$gene
+  gene_list <- sort(gene_list, decreasing = TRUE)
+  
+  converted <- bitr(names(gene_list), 
+                    fromType = "SYMBOL",
+                    toType = "ENTREZID",
+                    OrgDb = org.Hs.eg.db)
+  converted <- distinct(converted, ENTREZID, .keep_all = TRUE)
+  gene_list <- gene_list[converted$SYMBOL]
+  names(gene_list) <- converted$ENTREZID
+
+  options(timeout = 1000)
+  set.seed(123)
+  
+  gsea_result <- gseKEGG(
+    geneList = gene_list,
+    organism = "hsa",
+    keyType = "kegg",
+    pvalueCutoff = 0.1,
+    pAdjustMethod = "BH",
+    verbose = FALSE
+  )
+  if (is.null(gsea_result) || nrow(gsea_result) < 1) {
+    return(NULL)
+  }
+  
+  gsea_df <- as.data.frame(gsea_result) %>%
+    mutate(
+      Group = group_name,
+      Direction = ifelse(NES > 0, "Enriched in ALDH2(High)", "Enriched in ALDH2(Low)"),
+      Pathway = gsub(" - Homo sapiens \\(human\\)", "", Description),
+      Pathway = gsub("Homo sapiens: ", "", Pathway)
+    ) %>%
+    dplyr::select(ID, Pathway, NES, pvalue, p.adjust, qvalue, core_enrichment, Group, Direction)
+  
+  return(gsea_df)
+}
+healthy_gsea <- perform_GSEA_analysis("Healthy")
+ckd_gsea <- perform_GSEA_analysis("CKD")
+all_gsea <- bind_rows(healthy_gsea, ckd_gsea) %>%
+  filter(p.adjust < 0.05 & qvalue < 0.2) %>%  # 使用双重筛选
+  group_by(Group, Direction) %>%
+  arrange(desc(abs(NES))) %>%
+  slice_head(n = 10) %>%
+  ungroup()
+
+library(openxlsx)
+excel_file <- "GSEA_Analysis_Results.xlsx"
+wb <- createWorkbook()
+addWorksheet(wb, "Full_GSEA_Results")
+addWorksheet(wb, "Top_Pathways")
+writeData(wb, sheet = "Top_Pathways", all_gsea)
+saveWorkbook(wb, excel_file, overwrite = TRUE)
+message(paste("222GSEA results saved to:", excel_file))
+
+if (!is.null(all_gsea) && nrow(all_gsea) > 0) {
+  all_gsea <- all_gsea %>%
+    mutate(
+      Pathway = str_to_sentence(Pathway),
+      Pathway = ifelse(nchar(Pathway) > 100,
+                       paste0(str_trunc(Pathway, 100, side = "right"), "..."),
+                       Pathway)
+    )
+  healthy_data <- all_gsea %>% filter(Group == "Healthy")
+  ckd_data <- all_gsea %>% filter(Group == "CKD")
+  create_gsea_plot <- function(data, group_name) {
+    if (nrow(data) == 0) {
+      message(paste0("No significant pathways found for ", group_name, " group."))
+      return(NULL)
+    }
+    
+    ggplot(data,
+           aes(x = NES,
+               y = fct_reorder(Pathway, NES),
+               fill = Direction)) +
+      geom_col(width = 0.7, alpha = 0.85, color = "black", size = 0.3) +
+      scale_fill_manual(
+        name = "Enrichment Direction",
+        values = c(
+          "Enriched in ALDH2(High)" = "#7F5A58",
+          "Enriched in ALDH2(Low)" = "#9CB071"
+        ),
+        drop = FALSE,
+        breaks = c("Enriched in ALDH2(Low)", "Enriched in ALDH2(High)")  
+      ) +
+      coord_fixed(ratio = 0.25)+
+      geom_vline(xintercept = 0, linetype = "solid", size = 0.7, color = "black") +
+      labs(
+        x = "",
+        y = NULL,
+        title = paste("Normalized Enrichment Score (NES) -", group_name), 
+        subtitle = "",
+        fill = "Enrichment Direction"
+      ) +
+      theme_minimal(base_size = 14) +
+      scale_x_continuous(
+        limits = c(-3, 3.5),
+        breaks = c(-3, 0, 3.5)  
+      )+
+      theme(
+        text = element_text(family = "Arial"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(
+          color = "black",        
+          fill = NA,              
+          linewidth = 1.5,          
+          linetype = "solid"      
+        ),
+        axis.text.y = element_text(size = 26, color = "black", margin = margin(t = 10, b = 10)),
+        axis.text.x = element_text(size = 26, color = "black"),
+        axis.title.x = element_text(size = 26, margin = margin(t = 10)),
+        plot.title = element_text(
+          hjust = 0.5,
+          size = 32,
+          margin = margin(b = 10)
+        ),
+        legend.position = "top",
+        axis.line = element_line(size = 1.5, color = "black"),
+        axis.ticks.length=grid::unit(0.3, "cm"),
+        axis.ticks = element_line(linewidth = 1.5),
+        legend.title = element_text(size = 26, margin = margin(r = 15)),
+        legend.text = element_text(size = 26, margin = margin(r = 10, l = 10)),
+        legend.spacing.x = unit(2, "cm"),  # 图例整体横向间距
+        legend.margin = margin(t = 20, b = 20),
+        plot.margin = margin(15, 25, 15, 100)
+      )
+  }
+  if (nrow(healthy_data) > 0) {
+    healthy_plot <- create_gsea_plot(healthy_data, "Healthy")
+    print(healthy_plot)
+    ggsave(
+      filename = "GSEA_Analysis_Healthy222.png",
+      plot = healthy_plot,
+      width = 24,
+      height = 12,
+      dpi = 600
+    )
+  }
+  if (nrow(ckd_data) > 0) {
+    ckd_plot <- create_gsea_plot(ckd_data, "CKD")
+    print(ckd_plot)
+    ggsave(
+      filename = "GSEA_Analysis_CKD222.png",
+      plot = ckd_plot,
+      width = 24,
+      height = 12,
+      dpi = 600
+    )
+  }
+  
+} else {
+  message("No significant pathways found in GSEA analysis.")
+}
+
+fatty_acid_genes <- list(c(
+  "CD36", "SLC27A1", "SLC27A2", "SLC27A3", "SLC27A4", "FABP1", "FABP3", "FABP4", 
+  
+  "ACACA", "ACACB", "FASN", "SCD", "ELOVL1", "ELOVL2", "ELOVL3", "ELOVL4", "ELOVL5", "ELOVL6", "ELOVL7",
+  
+  "ACSL1", "ACSL3", "ACSL4", "ACSL5", "ACSL6", 
+  
+  "CPT1A", "CPT1B", "CPT2", "SLC25A20",  
+  "ACADVL", "ACADM", "ACADS", "ACADSB",  
+  "ECH1", "ECHS1",                       
+  "HADHA", "HADHB",                     
+  "ACAA1", "ACAA2",                      
+  
+  "ACOX1", "ACOX2", "ACOX3", "PECR", 
+  
+  "CYP4A11", "CYP4A22", "CYP4B1", 
+  
+  "PPARA", "PPARD", "PPARG", "PPARGC1A",  
+  "SREBF1", "SREBF2",                    
+  "MLXIPL"                               
+))
+
+
+pt_seurat <- AddModuleScore(
+  object = pt_aldh2,
+  features = fatty_acid_genes,
+  name = "FattyAcidScore",
+  ctrl = 1000  
+)
+
+
+head(pt_seurat$FattyAcidScore1)
+pt_seurat$FattyAcidScore1 <- pt_seurat$FattyAcidScore1 - min(pt_seurat$FattyAcidScore1)
+head(pt_seurat$FattyAcidScore1)
+
+score_of_interest <- "FattyAcidScore1"
+
+score_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "ALDH2_group", score_of_interest)
+)
+
+filtered_data <- score_data %>%
+  dplyr::filter(
+    ALDH2_group %in% c("ALDH2(High)", "ALDH2(Low)"),
+    group == "CKD"  
+  ) %>%
+  mutate(ALDH2_group = factor(ALDH2_group, levels = c("ALDH2(High)", "ALDH2(Low)")))
+
+if (all(c("ALDH2(High)", "ALDH2(Low)") %in% filtered_data$ALDH2_group)) {
+  normal_data <- filtered_data %>% 
+    filter(ALDH2_group == "ALDH2(High)") %>% 
+    pull(score_of_interest)
+  
+  injury_data <- filtered_data %>% 
+    filter(ALDH2_group == "ALDH2(Low)") %>% 
+    pull(score_of_interest)
+  
+  if (length(normal_data) >= 2 && length(injury_data) >= 2) {
+    p_value <- wilcox.test(normal_data, injury_data)$p.value
+  } else {
+    p_value <- NA_real_
+  }
+} else {
+  p_value <- NA_real_
+}
+
+comparison_stats <- tibble(
+  group = "CKD",
+  p_value = p_value,
+  p_label = case_when(
+    is.na(p_value) ~ "",
+    p_value < 0.001 ~ "***",
+    p_value < 0.01 ~ "**",
+    p_value < 0.05 ~ "*",
+    TRUE ~ "ns"
+  )
+)
+violin_height <- max(filtered_data[[score_of_interest]], na.rm = TRUE) * 1.15
+max_values <- filtered_data %>%
+  group_by(ALDH2_group) %>%
+  summarise(max_value = max(!!sym(score_of_interest), na.rm = TRUE))
+y_pos <- max(max_values$max_value) * 1.15
+x_levels <- levels(interaction(filtered_data$group, filtered_data$ALDH2_group))
+comparison_stats <- comparison_stats %>% 
+  mutate(
+    y_pos = y_pos,
+    xmin = which(x_levels == "CKD.ALDH2(High)"),  
+    xmax = which(x_levels == "CKD.ALDH2(Low)")   
+  )
+
+p <- ggplot(filtered_data, 
+            aes(x = interaction(group, ALDH2_group), 
+                y = !!sym(score_of_interest), 
+                fill =ALDH2_group )) +
+  geom_violin(
+    width = 0.6, 
+    scale = "width",
+    trim = TRUE,
+    adjust = 0.8,
+    linewidth = 0.2
+  ) +
+  scale_fill_manual(
+    values = c("ALDH2(Low)" = "#9CB071", "ALDH2(High)" = "#7F5A58"),
+    guide = "none"
+  ) +
+  scale_x_discrete(
+    labels = function(x) {
+      parts <- strsplit(x, "\\.")
+      sapply(parts, function(p) p[2])
+    }
+  ) +
+  scale_y_continuous(
+    limits = c(0, max(filtered_data[[score_of_interest]] * 1.3, na.rm = TRUE)),
+    breaks = scales::pretty_breaks(n = 4),
+    expand = expansion(mult = c(0, 0))
+  ) + 
+  labs(
+    title = "Fatty Acid Metabolism in CKD",
+    x = "",
+    y = "Fatty Acid Score"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 3),
+      angle = 0,
+      vjust = 0.5
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+
+if (!is.na(comparison_stats$p_value)) {
+  p_signif2 <- p +
+    geom_segment(
+      data = comparison_stats,
+      aes(x = xmin, 
+          xend = xmax,
+          y = y_pos, 
+          yend = y_pos),
+      inherit.aes = FALSE,
+      size = 0.5,
+      color = "black",
+      arrow = arrow(
+        ends = "both",
+        angle = 90,
+        length = unit(2.5, "mm"),
+        type = "open"
+      )
+    ) +
+    geom_text(
+      data = comparison_stats,
+      aes(x = mean(c(xmin, xmax)), 
+          y = y_pos * 1.05- 0.05,
+          label = p_label),
+      inherit.aes = FALSE,
+      size = 12,
+      vjust = 0
+    )
+} else {
+  p_signif <- p
+}
+
+print(p_signif2)
+ggsave(
+  filename = "subpt_FAO22.png",
+  plot = p_signif2,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+
+
+
+
+
+
+score_of_interest <- "collagen.score"
+score_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "ALDH2_group", score_of_interest)
+)
+filtered_data <- score_data %>%
+  dplyr::filter(
+    ALDH2_group %in% c("ALDH2(High)", "ALDH2(Low)"),
+    group == "CKD"  
+  ) %>%
+  mutate(v = factor(ALDH2_group, levels = c("ALDH2(High)", "ALDH2(Low)")))
+if (all(c("ALDH2(High)", "ALDH2(Low)") %in% filtered_data$ALDH2_group)) {
+  normal_data <- filtered_data %>% 
+    filter(ALDH2_group == "ALDH2(High)") %>% 
+    pull(score_of_interest)
+  
+  injury_data <- filtered_data %>% 
+    filter(ALDH2_group == "ALDH2(Low)") %>% 
+    pull(score_of_interest)
+  if (length(normal_data) >= 2 && length(injury_data) >= 2) {
+    p_value <- wilcox.test(normal_data, injury_data)$p.value
+  } else {
+    p_value <- NA_real_
+  }
+} else {
+  p_value <- NA_real_
+}
+
+comparison_stats <- tibble(
+  group = "CKD",
+  p_value = p_value,
+  p_label = case_when(
+    is.na(p_value) ~ "",
+    p_value < 0.001 ~ "***",
+    p_value < 0.01 ~ "**",
+    p_value < 0.05 ~ "*",
+    TRUE ~ "ns"
+  )
+)
+violin_height <- max(filtered_data[[score_of_interest]], na.rm = TRUE) * 1.15
+max_values <- filtered_data %>%
+  group_by(ALDH2_group) %>%
+  summarise(max_value = max(!!sym(score_of_interest), na.rm = TRUE))
+y_pos <- max(max_values$max_value) * 1.15
+x_levels <- levels(interaction(filtered_data$group, filtered_data$ALDH2_group))
+comparison_stats <- comparison_stats %>% 
+  mutate(
+    y_pos = y_pos,
+    xmin = which(x_levels == "CKD.ALDH2(High)"),
+    xmax = which(x_levels == "CKD.ALDH2(Low)")   
+  )
+p <- ggplot(filtered_data, 
+            aes(x = interaction(group, ALDH2_group), 
+                y = !!sym(score_of_interest), 
+                fill = ALDH2_group)) +
+  geom_violin(
+    width = 0.6, 
+    scale = "width",
+    trim = TRUE,
+    adjust = 0.8,
+    linewidth = 0.2
+  ) +
+  scale_fill_manual(
+    values = c("ALDH2(Low)" = "#9CB071", "ALDH2(High)" = "#7F5A58"),
+    guide = "none"
+  ) +
+  scale_x_discrete(
+    labels = function(x) {
+      parts <- strsplit(x, "\\.")
+      sapply(parts, function(p) p[2])
+    }
+  ) +
+  scale_y_continuous(
+    limits = c(0, max(filtered_data[[score_of_interest]] * 1.3, na.rm = TRUE)),
+    breaks = scales::pretty_breaks(n = 4),
+    expand = expansion(mult = c(0, 0))
+  ) + 
+  labs(
+    title = "Collagen accumulation in CKD",
+    x = "",
+    y = "Collagen Score"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.y = element_text(size = 32, margin = margin(r = 15)),
+    axis.text.x = element_text(
+      size = 32, 
+      color = "black", 
+      margin = margin(t = 3),
+      angle = 0,
+      vjust = 0.5
+    ),
+    axis.text.y = element_text(size = 32, color = "black", margin = margin(r = 5)),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    axis.ticks.x = element_line(color = "black", linewidth = 1),
+    axis.ticks.y = element_line(color = "black", linewidth = 1),
+    axis.ticks.length.x = unit(0.25, "cm"),
+    axis.ticks.length.y = unit(0.25, "cm"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+if (!is.na(comparison_stats$p_value)) {
+  p_signif3 <- p +
+    geom_segment(
+      data = comparison_stats,
+      aes(x = xmin, 
+          xend = xmax,
+          y = y_pos, 
+          yend = y_pos),
+      inherit.aes = FALSE,
+      size = 0.5,
+      color = "black",
+      arrow = arrow(
+        ends = "both",
+        angle = 90,
+        length = unit(2.5, "mm"),
+        type = "open"
+      )
+    ) +
+    geom_text(
+      data = comparison_stats,
+      aes(x = mean(c(xmin, xmax)), 
+          y = y_pos * 1.05- 0.05,
+          label = p_label),
+      inherit.aes = FALSE,
+      size = 12,
+      vjust = 0
+    )
+} else {
+  p_signif <- p
+}
+print(p_signif3)
+ggsave(
+  filename = "subpt_collagen22.png",
+  plot = p_signif3,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+p_emt_genes <- c("VIM",
+                 "CDH2", 
+                 "COL1A1",
+                 "COL3A1",
+                 "MMP2", 
+                 "TGFB1") 
+
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)
+
+expression_data <- FetchData(
+  object = pt_seurat,
+  vars = c("group", "ALDH2_group", p_emt_genes)
+)
+long_data <- expression_data %>%
+  dplyr::filter(
+    ALDH2_group %in% c("ALDH2(High)", "ALDH2(Low)"),
+    group == "CKD"  
+  ) %>%
+  mutate(ALDH2_group = factor(ALDH2_group, levels = c("ALDH2(High)", "ALDH2(Low)"))) %>%
+  pivot_longer(
+    cols = all_of(p_emt_genes),
+    names_to = "gene",
+    values_to = "expression"
+  ) %>%
+  mutate(gene = factor(gene, levels = p_emt_genes))  
+comparison_stats <- long_data %>%
+  group_by(gene) %>%
+  summarise(
+    p_value = {
+      normal <- expression[ALDH2_group == "ALDH2(High)"]
+      injury <- expression[ALDH2_group == "ALDH2(Low)"]
+      
+      if (length(normal) >= 2 && length(injury) >= 2) {
+        wilcox.test(normal, injury)$p.value
+      } else {
+        NA_real_
+      }
+    }
+  ) %>%
+  mutate(
+    p_label = case_when(
+      is.na(p_value) ~ "",
+      p_value < 0.001 ~ "***",
+      p_value < 0.01 ~ "**",
+      p_value < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+gene_max <- long_data %>%
+  group_by(gene) %>%
+  summarise(max_exp = max(expression, na.rm = TRUE))
+comparison_stats <- comparison_stats %>%
+  left_join(gene_max, by = "gene") %>%
+  mutate(
+    y_pos = max_exp * 1.15,  
+    gene_index = as.numeric(gene),
+    xmin = gene_index ,  
+    xmax = gene_index   
+  )
+
+p <- ggplot(long_data, aes(x = gene, y = expression)) +
+  geom_violin(
+    aes(fill = ALDH2_group),
+    position = position_dodge(width = 0.8),
+    width = 0.7,
+    scale = "width",
+    trim = TRUE,
+    linewidth = 0.2
+  ) +
+  geom_segment(
+    data = comparison_stats,
+    aes(x = gene_index-0.2, xend = gene_index+0.2, 
+        y = y_pos, yend = y_pos),
+    size = 0.5,
+    color = "black",
+    inherit.aes = FALSE,
+    arrow = arrow(
+      ends = "both",
+      angle = 90,
+      length = unit(2.5, "mm"),
+      type = "open"
+    )
+  ) +
+  geom_text(
+    data = comparison_stats,
+    aes(x = gene_index, y = y_pos * 1.05-0.05, label = p_label),
+    size = 12,
+    vjust = 0,
+    inherit.aes = FALSE
+  ) +
+  scale_fill_manual(
+    name = "Cell Type",
+    values = c("ALDH2(Low)" = "#9CB071", "ALDH2(High)" = "#7F5A58")
+  ) +
+  scale_y_continuous(
+    limits = c(0, 6),
+    breaks = scales::pretty_breaks(n = 4),
+    expand = expansion(mult = c(0, 0))
+  ) + 
+  labs(
+    title = "p-EMT Genes Expression in CKD",
+    x = "",
+    y = "Expression Level"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 32),
+    axis.title.x = element_text(size = 32),
+    axis.title.y = element_text(size = 32,margin = margin(r = 10)),
+    axis.text.x = element_text(
+      size = 32,
+      color = "black",
+      angle = 0,
+      vjust = 1,
+      hjust = 0.5,
+      margin = margin(t=5)
+    ),
+    axis.text.y = element_text(size = 32),
+    axis.line = element_line(size = 1.5, color = "black"),
+    axis.ticks.length=grid::unit(0.3, "cm"),
+    axis.ticks = element_line(linewidth = 1.5),
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    legend.position = "top",
+    legend.justification = "center",
+    legend.key.size = unit(0.8, "cm"),
+    legend.text = element_text(size = 28,margin = margin(r = 20 ,l=10)), 
+    legend.spacing.x = unit(6, "cm"),  
+    legend.margin = margin(t = 20, b = 20),
+    legend.title = element_blank(),
+    plot.margin = margin(t = 5, r = 5, b = -8, l = 5)
+  )
+p
+ggsave(
+  filename = "p_emt_genes_combined22.png",
+  plot = p,
+  width = 14, 
+  height = 8,
+  dpi = 600
+)
+
+
+
